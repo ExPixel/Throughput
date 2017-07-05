@@ -5,9 +5,9 @@ use std::io::{stdin, stdout, Write, Read};
 use std::time::{Duration, Instant};
 use std::net::{SocketAddr, TcpListener, IpAddr};
 
-const BUFFER_SIZE: usize = 4096;
-const ITERATIONS_PER_BUFFER: usize = 1;
-const DEFAULT_address: &'static str = "127.0.0.1";
+const DEFAULT_BUFFER_SIZE: usize = 4096;
+const DEFAULT_ITERATION_COUNT: usize = 1;
+const DEFAULT_ADDRESS: &'static str = "127.0.0.1";
 
 macro_rules! print_err {
     ($fmt:expr) => ({
@@ -49,10 +49,21 @@ fn main() {
         .author("Adolph C.")
         .about("Measures the throughput of stdin or a socket.")
         .arg(Arg::with_name("address")
-            .short("i")
+            .short("l")
             .long("addr")
             .value_name("IP Address")
             .help("IP address to listen to. Defaults to 127.0.0.1. Must specify port.")
+            .takes_value(true))
+        .arg(Arg::with_name("buffer_size")
+            .short("b")
+            .long("bufsize")
+            .value_name("BYTES")
+            .help("The size of the buffer used to read from the stream in bytes. Defaults to 4096.")
+            .takes_value(true))
+        .arg(Arg::with_name("iterations")
+            .short("i")
+            .long("iterations")
+            .help("The number of times the buffer should be filled before a measure is taken. Defaults to 1.")
             .takes_value(true))
         .arg(Arg::with_name("port")
             .short("p")
@@ -63,6 +74,32 @@ fn main() {
         .after_help("If a port/address is not specified, throughput will read from stdin.")
         .get_matches();
 
+    let buffer_size: usize;
+    let iterations: usize;
+
+    if let Some(buf_size_str) = matches.value_of("buffer_size") {
+        if let Ok(bsize) = buf_size_str.parse() {
+            buffer_size = bsize;
+        } else {
+            print_err!("Buffer size must be a valid number.");
+            std::process::exit(1);
+        }
+    } else {
+        buffer_size = DEFAULT_BUFFER_SIZE;
+    }
+
+
+    if let Some(iterations_str) = matches.value_of("iterations") {
+        if let Ok(it) = iterations_str.parse() {
+            iterations = it;
+        } else {
+            print_err!("Iterations must be a valid number.");
+            std::process::exit(1);
+        }
+    } else {
+        iterations = DEFAULT_ITERATION_COUNT;
+    }
+
     let address_present = matches.is_present("address");
     let port_present = matches.is_present("port");
     if address_present || port_present {
@@ -70,22 +107,22 @@ fn main() {
             print_err!("A port must be speicified alongside a address.");
             std::process::exit(1);
         } else {
-            let address = matches.value_of("address").unwrap_or(DEFAULT_address);
+            let address = matches.value_of("address").unwrap_or(DEFAULT_ADDRESS);
             let port = matches.value_of("port").expect("Expected port arg to have value.");
 
             if let Ok(parsed_port) = port.parse() {
-                measure_tcp_stream(address, parsed_port);
+                measure_tcp_stream(address, parsed_port, buffer_size, iterations);
             } else {
                 print_err!("Port must be a valid number from 0 to 65535");
                 std::process::exit(1);
             }
         }
     } else {
-        measure_stdin();
+        measure_stdin(buffer_size, iterations);
     }
 }
 
-fn measure_tcp_stream(address: &str, port: u16) {
+fn measure_tcp_stream(address: &str, port: u16, buffer_size: usize, iterations: usize) {
     let parsed_addr: IpAddr = match address.parse() {
         Ok(parsed) => parsed,
         Err(_) => {
@@ -103,7 +140,7 @@ fn measure_tcp_stream(address: &str, port: u16) {
                 Ok((stream, incoming_addr)) => {
                     println!("Reading incoming data from {}", incoming_addr);
                     println!();
-                    measure_reader(stream);
+                    measure_reader(stream, buffer_size, iterations);
                 },
 
                 Err(err) => {
@@ -122,24 +159,24 @@ fn measure_tcp_stream(address: &str, port: u16) {
     };
 }
 
-fn measure_stdin() {
+fn measure_stdin(buffer_size: usize, iterations: usize) {
     let input = stdin();
-    measure_reader(input.lock());
+    measure_reader(input.lock(), buffer_size, iterations);
 }
 
-fn measure_reader<R: Read>(mut reader: R) {
+fn measure_reader<R: Read>(mut reader: R, buffer_size: usize, iterations: usize) {
     let output = stdout();
     let mut locked_output = output.lock();
     
-    let mut buffer = Vec::with_capacity(BUFFER_SIZE);
-    buffer.resize(BUFFER_SIZE, 0);
+    let mut buffer = Vec::with_capacity(buffer_size);
+    buffer.resize(buffer_size, 0);
 
     let mut last_measured = Instant::now();
     let mut transfer_info = TransferInfo::default();
 
     loop {
         let mut end_loop = false;
-        for _ in 0..ITERATIONS_PER_BUFFER {
+        for _ in 0..iterations {
             match reader.read(&mut buffer) {
                 Ok(bytes_read) => {
                     transfer_info.last_bytes_transferred += bytes_read;
