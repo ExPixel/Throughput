@@ -1,0 +1,7 @@
+[package]
+name = "throughput"
+version = "0.1.0"
+authors = ["Adolph C. <adolph.celestin@gmail.com>"]
+
+[dependencies]
+clap = "2.25.0"
